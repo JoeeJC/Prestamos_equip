@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Search, Package } from 'lucide-react';
 import { supabase, type Categoria, type Equipo } from '@/lib/supabase';
+import { verificarYCaducarReservasVencidas } from '@/lib/prestamos';
 import Badge, { estadoEquipoVariant } from '@/components/Badge';
 
 export default function Catalog({
@@ -18,6 +19,7 @@ export default function Catalog({
   useEffect(() => {
     let active = true;
     (async () => {
+      await verificarYCaducarReservasVencidas().catch(() => undefined);
       const [{ data: e }, { data: c }] = await Promise.all([
         supabase.from('equipos').select('*, categorias_equipo(*)').order('codigo_inventario'),
         supabase.from('categorias_equipo').select('*').order('nombre'),

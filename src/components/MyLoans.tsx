@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Inbox, Calendar, Clock, X } from 'lucide-react';
 import { supabase, type DetallePrestamo, type Prestamo } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth';
+import { verificarYCaducarReservasVencidas } from '@/lib/prestamos';
 import Badge, { estadoPrestamoVariant } from '@/components/Badge';
 
 type PrestamoConDetalle = Prestamo & { detalle_prestamos?: DetallePrestamo[] };
@@ -15,6 +16,7 @@ export default function MyLoans({ refreshKey }: { refreshKey?: number }) {
   const load = async () => {
     if (!session) return;
     setLoading(true);
+    await verificarYCaducarReservasVencidas().catch(() => undefined);
     const { data } = await supabase
       .from('prestamos')
       .select('*, detalle_prestamos(*, equipos(*, categorias_equipo(*)))')
