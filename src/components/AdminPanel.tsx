@@ -12,6 +12,7 @@ import {
   X,
 } from 'lucide-react';
 import { supabase, type DetallePrestamo, type Equipo, type Prestamo, type Usuario } from '@/lib/supabase';
+import { verificarYCaducarReservasVencidas } from '@/lib/prestamos';
 import Badge, { estadoPrestamoVariant, estadoUsuarioVariant } from '@/components/Badge';
 
 type PrestamoAdmin = Prestamo & {
@@ -51,6 +52,7 @@ export default function AdminPanel() {
   const [prestamos, setPrestamos] = useState<PrestamoAdmin[]>([]);
   const [prestamosFecha, setPrestamosFecha] = useState<PrestamoAdmin[]>([]);
   const [loading, setLoading] = useState(false);
+  const [reservasCaducadas, setReservasCaducadas] = useState(0);
   const [notFound, setNotFound] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [edit, setEdit] = useState<{
@@ -129,6 +131,23 @@ export default function AdminPanel() {
   useEffect(() => {
     cargarPrestamosPorFecha(fechaFiltro);
   }, [fechaFiltro]);
+
+  useEffect(() => {
+    let activo = true;
+    (async () => {
+      try {
+        const canceladas = await verificarYCaducarReservasVencidas();
+        if (!activo || canceladas === 0) return;
+        setReservasCaducadas(canceladas);
+        cargarPrestamosPorFecha(fechaFiltro);
+      } catch {
+        return;
+      }
+    })();
+    return () => {
+      activo = false;
+    };
+  }, []);
 
   useEffect(() => {
     const termino = dni.trim();
@@ -457,6 +476,28 @@ export default function AdminPanel() {
           <PlusCircle size={16} /> Préstamo en mostrador
         </button>
       </div>
+
+      {reservasCaducadas > 0 && (
+        <div
+          role="status"
+          className="mb-6 flex items-start justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100"
+        >
+          <p className="flex items-start gap-2">
+            <PackageX size={16} className="mt-0.5 shrink-0" />
+            {reservasCaducadas === 1
+              ? '1 reserva vencida se canceló automáticamente como No Presentado y su equipo volvió a estar disponible.'
+              : `${reservasCaducadas} reservas vencidas se cancelaron automáticamente como No Presentado y sus equipos volvieron a estar disponibles.`}
+          </p>
+          <button
+            type="button"
+            onClick={() => setReservasCaducadas(0)}
+            className="btn-ghost h-8 w-8 shrink-0 !px-0"
+            aria-label="Cerrar aviso"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
 
       {/* Buscador por DNI */}
       <div className="card mb-5 p-4">
