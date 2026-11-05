@@ -59,7 +59,7 @@ function Shell() {
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900 dark:bg-gray-950 dark:text-gray-100">
-      <Header right={user} />
+      <Header right={user} onHome={() => setView('catalog')} />
 
       {/* Nav móvil: pestañas inferiores; nav escritorio: barra superior */}
       <nav className="sticky top-16 z-20 border-b border-gray-200 bg-white/80 backdrop-blur dark:border-gray-800 dark:bg-gray-950/80">
