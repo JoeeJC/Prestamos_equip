@@ -52,9 +52,6 @@ export default function Login() {
 
       <div className="relative mx-auto flex min-h-screen max-w-md flex-col justify-center px-6 py-10">
         <div className="mb-8 text-center">
-          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-xl bg-brand-600 text-white shadow-card">
-            <span className="text-lg font-bold tracking-tight">ITU</span>
-          </div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">ITU Equipos</h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
             Sistema de préstamos y reservas de equipos
@@ -62,6 +59,24 @@ export default function Login() {
         </div>
 
         <form onSubmit={submit} className="card p-6">
+          <div
+            role="img"
+            aria-label="ITU, Instituto Tecnológico Universitario"
+            className="mb-6 flex flex-col items-center gap-3"
+          >
+            <span className="flex items-baseline text-5xl font-black leading-none tracking-tight text-[#004D5A] dark:text-cyan-200">
+              <span className="relative">
+                ı
+                <span className="absolute left-1/2 -top-[0.1em] h-[0.18em] w-[0.18em] -translate-x-1/2 rounded-full bg-[#C5282E]" />
+              </span>
+              <span>t</span>
+              <span>u</span>
+            </span>
+            <span className="w-full border-y-2 border-[#C5282E] py-1.5 text-center text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-700 dark:text-gray-200">
+              Instituto Tecnológico Universitario
+            </span>
+          </div>
+
           <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold text-gray-900 dark:text-white">
             <LogIn size={18} className="text-brand-600" /> Iniciar sesión
           </h2>
