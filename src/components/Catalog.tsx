@@ -3,11 +3,11 @@ import { Search, Package } from 'lucide-react';
 import { supabase, type Categoria, type Equipo } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth';
 import {
-  LIMITE_NOTEBOOKS,
-  MENSAJE_LIMITE_NOTEBOOKS,
   aplicaLimiteNotebooks,
-  contarNotebooksActivas,
+  cargarCupoNotebooks,
   esNotebook,
+  mensajeLimiteNotebooks,
+  type CupoNotebooks,
   verificarYCaducarReservasVencidas,
 } from '@/lib/prestamos';
 import Badge, { estadoEquipoVariant } from '@/components/Badge';
@@ -28,21 +28,21 @@ export default function Catalog({
   const [q, setQ] = useState('');
   const [cat, setCat] = useState<string>('all');
   const [estado, setEstado] = useState<string>('all');
-  const [notebooksActivas, setNotebooksActivas] = useState<number | null>(null);
+  const [cupo, setCupo] = useState<CupoNotebooks | null>(null);
 
   useEffect(() => {
     let active = true;
     (async () => {
       await verificarYCaducarReservasVencidas().catch(() => undefined);
-      const [{ data: e }, { data: c }, activas] = await Promise.all([
+      const [{ data: e }, { data: c }, cupoActual] = await Promise.all([
         supabase.from('equipos').select('*, categorias_equipo(*)').order('codigo_inventario'),
         supabase.from('categorias_equipo').select('*').order('nombre'),
-        limitado && idUsuario ? contarNotebooksActivas(idUsuario).catch(() => null) : null,
+        limitado && idUsuario ? cargarCupoNotebooks(idUsuario).catch(() => null) : null,
       ]);
       if (!active) return;
       setEquipos((e ?? []) as Equipo[]);
       setCategorias((c ?? []) as Categoria[]);
-      setNotebooksActivas(activas);
+      setCupo(cupoActual);
       setLoading(false);
     })();
     return () => {
@@ -65,7 +65,7 @@ export default function Catalog({
   }, [equipos, q, cat, estado]);
 
   const sinCupoNotebooks = (eq: Equipo) =>
-    limitado && esNotebook(eq) && notebooksActivas !== null && notebooksActivas >= LIMITE_NOTEBOOKS;
+    limitado && esNotebook(eq) && cupo !== null && cupo.activas >= cupo.limite;
 
   if (loading) {
     return (
@@ -145,7 +145,7 @@ export default function Catalog({
               )}
               <div
                 className="mt-auto pt-4"
-                title={sinCupoNotebooks(eq) ? MENSAJE_LIMITE_NOTEBOOKS : undefined}
+                title={sinCupoNotebooks(eq) && cupo ? mensajeLimiteNotebooks(cupo.limite) : undefined}
               >
                 <button
                   type="button"
@@ -156,7 +156,7 @@ export default function Catalog({
                   {eq.estado !== 'Disponible'
                     ? 'No disponible'
                     : sinCupoNotebooks(eq)
-                      ? `Cupo máximo alcanzado (${notebooksActivas}/${LIMITE_NOTEBOOKS})`
+                      ? `Cupo máximo alcanzado (${cupo?.activas}/${cupo?.limite})`
                       : 'Reservar'}
                 </button>
               </div>

@@ -1,13 +1,15 @@
 import { useState } from 'react';
-import { Boxes, ClipboardList } from 'lucide-react';
+import { Boxes, ClipboardList, Settings } from 'lucide-react';
 import AdminPanel from '@/components/AdminPanel';
 import InventarioAdmin from '@/components/InventarioAdmin';
+import LimiteNotebooksPanel from '@/components/LimiteNotebooksPanel';
 
-type Pestana = 'prestamos' | 'inventario';
+type Pestana = 'prestamos' | 'inventario' | 'configuracion';
 
 const PESTANAS: { id: Pestana; label: string; icon: typeof Boxes }[] = [
   { id: 'prestamos', label: 'Préstamos', icon: ClipboardList },
   { id: 'inventario', label: 'Inventario y stock', icon: Boxes },
+  { id: 'configuracion', label: 'Configuración', icon: Settings },
 ];
 
 export default function AdminTabs() {
@@ -39,7 +41,9 @@ export default function AdminTabs() {
         })}
       </div>
 
-      {pestana === 'prestamos' ? <AdminPanel /> : <InventarioAdmin />}
+      {pestana === 'prestamos' && <AdminPanel />}
+      {pestana === 'inventario' && <InventarioAdmin />}
+      {pestana === 'configuracion' && <LimiteNotebooksPanel />}
     </div>
   );
 }
