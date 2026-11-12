@@ -14,6 +14,7 @@ import {
 import { supabase, type DetallePrestamo, type Equipo, type Prestamo, type Usuario } from '@/lib/supabase';
 import { verificarYCaducarReservasVencidas } from '@/lib/prestamos';
 import Badge, { estadoPrestamoVariant, estadoUsuarioVariant } from '@/components/Badge';
+import EntregaDevolucionModal, { type ResultadoEntregaDevolucion } from '@/components/EntregaDevolucionModal';
 
 type PrestamoAdmin = Prestamo & {
   usuarios?: Pick<Usuario, 'id_usuario' | 'dni' | 'nombre' | 'apellido' | 'estado'>;
@@ -59,9 +60,6 @@ export default function AdminPanel() {
     tipo: 'entregar' | 'recibir';
     id_prestamo: string;
   } | null>(null);
-  const [estados, setEstados] = useState<Record<string, string>>({});
-  const [aMantenimiento, setAMantenimiento] = useState<Record<string, boolean>>({});
-  const [obs, setObs] = useState('');
   const [fechaFiltro, setFechaFiltro] = useState(() => fechaLocalISO());
   const [showSelectedDate, setShowSelectedDate] = useState(true);
   const [filtroPrestamos, setFiltroPrestamos] = useState<FiltroPrestamos>('todos');
@@ -353,35 +351,20 @@ export default function AdminPanel() {
 
   const openEdit = (p: PrestamoAdmin, tipo: 'entregar' | 'recibir') => {
     setEdit({ tipo, id_prestamo: p.id_prestamo });
-    const map: Record<string, string> = {};
-    (p.detalle_prestamos ?? []).forEach((d) => {
-      map[d.id_detalle] = tipo === 'entregar' ? d.estado_salida ?? '' : d.estado_devolucion ?? '';
-    });
-    setEstados(map);
-    setAMantenimiento({});
-    setObs(tipo === 'entregar' ? p.observaciones_entrega ?? '' : p.observaciones_devolucion ?? '');
   };
 
-  const guardar = async () => {
+  const guardar = async (resultado: ResultadoEntregaDevolucion) => {
     if (!edit) return;
     const p = [...prestamos, ...prestamosFecha].find((x) => x.id_prestamo === edit.id_prestamo);
     if (!p) return;
     setBusy(p.id_prestamo);
     try {
       const detalles = p.detalle_prestamos ?? [];
-      for (const d of detalles) {
-        const val = estados[d.id_detalle] ?? '';
-        if (edit.tipo === 'entregar') {
-          await supabase
-            .from('detalle_prestamos')
-            .update({ estado_salida: val })
-            .eq('id_detalle', d.id_detalle);
-        } else {
-          await supabase
-            .from('detalle_prestamos')
-            .update({ estado_devolucion: val })
-            .eq('id_detalle', d.id_detalle);
-        }
+      for (const e of resultado.equipos) {
+        await supabase
+          .from('detalle_prestamos')
+          .update(edit.tipo === 'entregar' ? { estado_salida: e.estado } : { estado_devolucion: e.estado })
+          .eq('id_detalle', e.id_detalle);
       }
 
       if (edit.tipo === 'entregar') {
@@ -390,7 +373,7 @@ export default function AdminPanel() {
           .update({
             estado: 'En Curso',
             hora_retiro_real: new Date().toISOString(),
-            observaciones_entrega: obs,
+            observaciones_entrega: resultado.observaciones || null,
           })
           .eq('id_prestamo', p.id_prestamo);
         await supabase
@@ -406,11 +389,11 @@ export default function AdminPanel() {
           .update({
             estado: 'Devuelto',
             hora_devolucion_real: new Date().toISOString(),
-            observaciones_devolucion: obs,
+            observaciones_devolucion: resultado.observaciones || null,
           })
           .eq('id_prestamo', p.id_prestamo);
-        const equiposConFallas = detalles.filter((d) => aMantenimiento[d.id_detalle]);
-        const equiposSinFallas = detalles.filter((d) => !aMantenimiento[d.id_detalle]);
+        const equiposConFallas = resultado.equipos.filter((e) => e.conDano);
+        const equiposSinFallas = resultado.equipos.filter((e) => !e.conDano);
 
         if (equiposSinFallas.length > 0) {
           await supabase
@@ -418,21 +401,18 @@ export default function AdminPanel() {
             .update({ estado: 'Disponible' })
             .in(
               'id_equipo',
-              equiposSinFallas.map((d) => d.id_equipo),
+              equiposSinFallas.map((e) => e.id_equipo),
             );
         }
 
-        for (const detalle of equiposConFallas) {
-          const dano = estados[detalle.id_detalle]?.trim();
-          const observacionActual = detalle.equipos?.observaciones?.trim();
-          const observaciones = dano
-            ? `${observacionActual ? `${observacionActual} | ` : ''}Daño en devolución: ${dano}`
-            : observacionActual || 'Equipo marcado para mantenimiento en la devolución';
+        for (const e of equiposConFallas) {
+          const observacionActual = detalles.find((d) => d.id_detalle === e.id_detalle)?.equipos?.observaciones?.trim();
+          const observaciones = `${observacionActual ? `${observacionActual} | ` : ''}Daño en devolución: ${e.estado}`;
 
           await supabase
             .from('equipos')
             .update({ estado: 'En mantenimiento', observaciones })
-            .eq('id_equipo', detalle.id_equipo);
+            .eq('id_equipo', e.id_equipo);
         }
       }
 
@@ -903,115 +883,14 @@ export default function AdminPanel() {
         const p = [...prestamos, ...prestamosFecha].find((x) => x.id_prestamo === edit.id_prestamo);
         if (!p) return null;
         return (
-          <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4">
-            <div className="flex max-h-[88vh] w-full max-w-lg flex-col rounded-t-2xl bg-white shadow-card dark:bg-gray-950 sm:rounded-2xl">
-              <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4 dark:border-gray-800">
-                <h3 className="flex items-center gap-2 text-lg font-semibold text-gray-900 dark:text-white">
-                  {edit.tipo === 'entregar' ? (
-                    <>
-                      <PackageCheck size={18} className="text-brand-600" /> Entregar equipos
-                    </>
-                  ) : (
-                    <>
-                      <PackageX size={18} className="text-brand-600" /> Recibir equipos
-                    </>
-                  )}
-                </h3>
-                <button
-                  type="button"
-                  onClick={() => setEdit(null)}
-                  className="btn-ghost h-9 w-9 !px-0"
-                >
-                  ×
-                </button>
-              </div>
-              <div className="flex-1 overflow-y-auto px-5 py-4">
-                <p className="mb-3 text-sm text-gray-500">
-                  {edit.tipo === 'entregar'
-                    ? 'Registrá el estado físico de salida de cada equipo.'
-                    : 'Registrá el estado físico de devolución de cada equipo.'}
-                </p>
-                <ul className="space-y-3">
-                  {(p.detalle_prestamos ?? []).map((d) => (
-                    <li
-                      key={d.id_detalle}
-                        className={`rounded-lg border p-3 transition-colors ${
-                          edit.tipo === 'recibir' && aMantenimiento[d.id_detalle]
-                            ? 'border-amber-300 bg-amber-50/50 dark:border-amber-800 dark:bg-amber-950/20'
-                            : 'border-gray-200 dark:border-gray-800'
-                        }`}
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <p className="text-sm font-medium text-gray-900 dark:text-white">
-                              {d.equipos?.codigo_inventario} · {d.equipos?.categorias_equipo?.nombre}
-                            </p>
-                            <p className="mb-2 text-xs text-gray-500">{d.equipos?.marca_modelo ?? '—'}</p>
-                          </div>
-                          {edit.tipo === 'recibir' && (
-                            <label className="flex shrink-0 cursor-pointer items-center gap-2 text-xs font-medium text-gray-700 dark:text-gray-300">
-                              <input
-                                type="checkbox"
-                                checked={Boolean(aMantenimiento[d.id_detalle])}
-                                onChange={(e) =>
-                                  setAMantenimiento((s) => ({
-                                    ...s,
-                                    [d.id_detalle]: e.target.checked,
-                                  }))
-                                }
-                                className="h-4 w-4 rounded border-gray-300 text-amber-600 focus:ring-amber-500"
-                              />
-                              Con daño
-                            </label>
-                          )}
-                        </div>
-                        {edit.tipo === 'recibir' && aMantenimiento[d.id_detalle] && (
-                          <p className="mb-2 text-xs font-medium text-amber-700 dark:text-amber-300">
-                            Pasará a «En mantenimiento»
-                          </p>
-                        )}
-                        <input
-                          className="input"
-                          placeholder={
-                            edit.tipo === 'entregar'
-                              ? 'Ej: Buen estado, pantalla limpia'
-                              : aMantenimiento[d.id_detalle]
-                                ? 'Detallar daño: rotura de pantalla, cable cortado, etc.'
-                                : 'Ej: Funcionando correctamente, sin daños'
-                          }
-                          value={estados[d.id_detalle] ?? ''}
-                          onChange={(e) =>
-                            setEstados((s) => ({ ...s, [d.id_detalle]: e.target.value }))
-                          }
-                        />
-                      </li>
-                  ))}
-                </ul>
-                <label className="mb-1 mt-4 block text-xs font-medium text-gray-500">
-                  Observaciones generales
-                </label>
-                <textarea
-                  className="input min-h-20"
-                  value={obs}
-                  onChange={(e) => setObs(e.target.value)}
-                  placeholder="Notas del administrador…"
-                />
-              </div>
-              <div className="flex justify-end gap-2 border-t border-gray-200 px-5 py-4 dark:border-gray-800">
-                <button type="button" onClick={() => setEdit(null)} className="btn-ghost">
-                  Cancelar
-                </button>
-                <button
-                  type="button"
-                  disabled={busy === p.id_prestamo}
-                  onClick={guardar}
-                  className="btn-primary"
-                >
-                  {busy === p.id_prestamo ? 'Guardando…' : 'Confirmar'}
-                </button>
-              </div>
-            </div>
-          </div>
+          <EntregaDevolucionModal
+            tipo={edit.tipo}
+            detalles={p.detalle_prestamos ?? []}
+            observacionesIniciales={(edit.tipo === 'entregar' ? p.observaciones_entrega : p.observaciones_devolucion) ?? ''}
+            guardando={busy === p.id_prestamo}
+            onCancelar={() => setEdit(null)}
+            onConfirmar={guardar}
+          />
         );
       })()}
     </div>
