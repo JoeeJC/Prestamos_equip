@@ -90,7 +90,9 @@ function Shell() {
       </nav>
 
       <main className="mx-auto max-w-7xl px-4 py-6 pb-24 sm:px-6 sm:pb-10">
-        {view === 'catalog' && <Catalog onReserve={(eq) => setReserve(eq)} />}
+        {view === 'catalog' && (
+          <Catalog onReserve={(eq) => setReserve(eq)} refreshKey={refreshKey} />
+        )}
         {view === 'loans' && <MyLoans refreshKey={refreshKey} />}
         {view === 'admin' && canAdmin && <AdminTabs />}
       </main>

@@ -1,8 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
-import { X, Calendar, Clock, ShoppingCart, Trash2, PlusCircle } from 'lucide-react';
+import { X, Calendar, Clock, ShoppingCart, Trash2, PlusCircle, AlertCircle } from 'lucide-react';
 import { supabase, type Equipo, type Categoria } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth';
 import Badge, { estadoEquipoVariant } from '@/components/Badge';
+import {
+  LIMITE_NOTEBOOKS,
+  MENSAJE_LIMITE_NOTEBOOKS,
+  aplicaLimiteNotebooks,
+  contarNotebooksActivas,
+  esNotebook,
+} from '@/lib/prestamos';
 
 const MAX_HOURS = 5;
 const START_HOURS = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19];
@@ -30,6 +37,25 @@ export default function ReserveModal({
   const [hours, setHours] = useState(3);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notebooksActivas, setNotebooksActivas] = useState<number | null>(null);
+
+  const idUsuario = session?.usuario.id_usuario;
+  const limitado = !!session && aplicaLimiteNotebooks(session.roles);
+
+  useEffect(() => {
+    if (!idUsuario || !limitado) return;
+    let active = true;
+    contarNotebooksActivas(idUsuario)
+      .then((n) => {
+        if (active) setNotebooksActivas(n);
+      })
+      .catch(() => {
+        if (active) setError('No se pudo verificar tu cupo de notebooks. Intentá nuevamente.');
+      });
+    return () => {
+      active = false;
+    };
+  }, [idUsuario, limitado]);
 
   useEffect(() => {
     let active = true;
@@ -70,6 +96,12 @@ export default function ReserveModal({
     });
   }, [equipos, cart, q]);
 
+  const notebooksEnCarrito = cart.filter(esNotebook).length;
+  const cupoNotebooksLleno =
+    limitado && notebooksActivas !== null && notebooksActivas + notebooksEnCarrito >= LIMITE_NOTEBOOKS;
+  const excedeCupoNotebooks =
+    limitado && notebooksActivas !== null && notebooksActivas + notebooksEnCarrito > LIMITE_NOTEBOOKS;
+
   const addToCart = (eq: Equipo) => setCart((c) => [...c, eq]);
   const removeFromCart = (id: string) => setCart((c) => c.filter((x) => x.id_equipo !== id));
 
@@ -94,6 +126,15 @@ export default function ReserveModal({
     }
     setBusy(true);
     try {
+      if (limitado) {
+        const activasAhora = await contarNotebooksActivas(session.usuario.id_usuario);
+        if (activasAhora + notebooksEnCarrito > LIMITE_NOTEBOOKS) {
+          setNotebooksActivas(activasAhora);
+          setError(MENSAJE_LIMITE_NOTEBOOKS);
+          return;
+        }
+      }
+
       const horaInicio = `${pad(startNum)}:00`;
       const horaFin = `${pad(endNum)}:00`;
 
@@ -272,7 +313,18 @@ export default function ReserveModal({
           <div className="card p-4">
             <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-gray-800 dark:text-gray-100">
               <PlusCircle size={16} className="text-brand-600" /> Equipos disponibles
+              {limitado && (
+                <span className="ml-auto text-xs font-normal text-gray-500">
+                  Notebooks activas: {notebooksActivas ?? '…'}/{LIMITE_NOTEBOOKS}
+                </span>
+              )}
             </div>
+            {limitado && cupoNotebooksLleno && (
+              <div className="mb-3 flex items-start gap-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-600 dark:bg-amber-950/30">
+                <AlertCircle size={16} className="mt-0.5 shrink-0" />
+                <span>{MENSAJE_LIMITE_NOTEBOOKS}</span>
+              </div>
+            )}
             <input
               className="input mb-3"
               placeholder="Buscar equipo para agregar…"
@@ -298,10 +350,17 @@ export default function ReserveModal({
                     </div>
                     <button
                       type="button"
+                      disabled={cupoNotebooksLleno && esNotebook(eq)}
                       onClick={() => addToCart(eq)}
                       className="btn-secondary h-8 px-2 text-xs"
                     >
-                      <PlusCircle size={14} /> Agregar
+                      {cupoNotebooksLleno && esNotebook(eq) ? (
+                        'Cupo lleno'
+                      ) : (
+                        <>
+                          <PlusCircle size={14} /> Agregar
+                        </>
+                      )}
                     </button>
                   </li>
                 ))}
@@ -320,7 +379,7 @@ export default function ReserveModal({
             </button>
             <button
               type="button"
-              disabled={busy}
+              disabled={busy || excedeCupoNotebooks}
               onClick={submit}
               className="btn-primary"
             >

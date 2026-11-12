@@ -1,38 +1,54 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Search, Package } from 'lucide-react';
 import { supabase, type Categoria, type Equipo } from '@/lib/supabase';
-import { verificarYCaducarReservasVencidas } from '@/lib/prestamos';
+import { useAuth } from '@/lib/auth';
+import {
+  LIMITE_NOTEBOOKS,
+  MENSAJE_LIMITE_NOTEBOOKS,
+  aplicaLimiteNotebooks,
+  contarNotebooksActivas,
+  esNotebook,
+  verificarYCaducarReservasVencidas,
+} from '@/lib/prestamos';
 import Badge, { estadoEquipoVariant } from '@/components/Badge';
 
 export default function Catalog({
   onReserve,
+  refreshKey,
 }: {
   onReserve: (equipo: Equipo) => void;
+  refreshKey: number;
 }) {
+  const { session } = useAuth();
+  const idUsuario = session?.usuario.id_usuario;
+  const limitado = !!session && aplicaLimiteNotebooks(session.roles);
   const [equipos, setEquipos] = useState<Equipo[]>([]);
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState('');
   const [cat, setCat] = useState<string>('all');
   const [estado, setEstado] = useState<string>('all');
+  const [notebooksActivas, setNotebooksActivas] = useState<number | null>(null);
 
   useEffect(() => {
     let active = true;
     (async () => {
       await verificarYCaducarReservasVencidas().catch(() => undefined);
-      const [{ data: e }, { data: c }] = await Promise.all([
+      const [{ data: e }, { data: c }, activas] = await Promise.all([
         supabase.from('equipos').select('*, categorias_equipo(*)').order('codigo_inventario'),
         supabase.from('categorias_equipo').select('*').order('nombre'),
+        limitado && idUsuario ? contarNotebooksActivas(idUsuario).catch(() => null) : null,
       ]);
       if (!active) return;
       setEquipos((e ?? []) as Equipo[]);
       setCategorias((c ?? []) as Categoria[]);
+      setNotebooksActivas(activas);
       setLoading(false);
     })();
     return () => {
       active = false;
     };
-  }, []);
+  }, [refreshKey, idUsuario, limitado]);
 
   const filtered = useMemo(() => {
     const query = q.trim().toLowerCase();
@@ -47,6 +63,9 @@ export default function Catalog({
       return hay.includes(query);
     });
   }, [equipos, q, cat, estado]);
+
+  const sinCupoNotebooks = (eq: Equipo) =>
+    limitado && esNotebook(eq) && notebooksActivas !== null && notebooksActivas >= LIMITE_NOTEBOOKS;
 
   if (loading) {
     return (
@@ -124,14 +143,21 @@ export default function Catalog({
                   {eq.observaciones}
                 </p>
               )}
-              <div className="mt-auto pt-4">
+              <div
+                className="mt-auto pt-4"
+                title={sinCupoNotebooks(eq) ? MENSAJE_LIMITE_NOTEBOOKS : undefined}
+              >
                 <button
                   type="button"
-                  disabled={eq.estado !== 'Disponible'}
+                  disabled={eq.estado !== 'Disponible' || sinCupoNotebooks(eq)}
                   onClick={() => onReserve(eq)}
                   className="btn-primary w-full"
                 >
-                  {eq.estado === 'Disponible' ? 'Reservar' : 'No disponible'}
+                  {eq.estado !== 'Disponible'
+                    ? 'No disponible'
+                    : sinCupoNotebooks(eq)
+                      ? `Cupo máximo alcanzado (${notebooksActivas}/${LIMITE_NOTEBOOKS})`
+                      : 'Reservar'}
                 </button>
               </div>
             </div>
