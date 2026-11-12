@@ -1,10 +1,18 @@
-import { supabase, type Equipo, type Rol } from '@/lib/supabase';
+import { supabase, type Categoria, type Equipo, type Rol } from '@/lib/supabase';
 
-const CLAVE_LIMITE_NOTEBOOKS = 'limite_notebooks_alumno';
 const ROLES_CON_CONFIGURACION = ['Pañol', 'Administrativo'];
 const ROLES_SIN_LIMITE = ['Pañol', 'Administrativo', 'Profesor Adjunto'];
+const ESTADOS_ACTIVOS = ['Reservado', 'En Curso'];
 
-export type CupoNotebooks = { limite: number; activas: number };
+export const LIMITE_MIN = 1;
+export const LIMITE_MAX = 50;
+
+export type CupoCategoria = {
+  id_categoria: string;
+  nombre: string;
+  limite: number;
+  activas: number;
+};
 
 export async function verificarYCaducarReservasVencidas(): Promise<number> {
   const { data, error } = await supabase.rpc('cancelar_reservas_vencidas');
@@ -13,67 +21,78 @@ export async function verificarYCaducarReservasVencidas(): Promise<number> {
   return data;
 }
 
-export function aplicaLimiteNotebooks(roles: Rol[]): boolean {
+export function aplicaLimitesReserva(roles: Rol[]): boolean {
   const nombres = roles.map((r) => r.nombre);
   return nombres.includes('Estudiante') && !nombres.some((n) => ROLES_SIN_LIMITE.includes(n));
 }
 
-export function puedeConfigurarLimite(roles: Rol[]): boolean {
+export function puedeConfigurarLimites(roles: Rol[]): boolean {
   return roles.some((r) => ROLES_CON_CONFIGURACION.includes(r.nombre));
 }
 
-export function mensajeLimiteNotebooks(limite: number): string {
-  return `Has alcanzado el límite máximo de ${limite} notebooks simultáneas. Debes devolver una notebook para poder reservar otra.`;
-}
-
-export function esNotebook(equipo: Equipo): boolean {
-  return equipo.categorias_equipo?.nombre === 'Notebook';
-}
-
-export async function obtenerLimiteNotebooks(): Promise<number> {
-  const { data, error } = await supabase
-    .from('configuracion_sistema')
-    .select('valor')
-    .eq('clave', CLAVE_LIMITE_NOTEBOOKS)
-    .maybeSingle();
-  if (error) throw new Error(error.message);
-  const limite = Number(data?.valor);
-  if (!Number.isInteger(limite) || limite < 1) {
-    throw new Error('El límite de notebooks no está configurado correctamente');
+export function mensajeLimiteCategoria(cupo: Pick<CupoCategoria, 'nombre' | 'limite'>): string {
+  if (cupo.nombre === 'Notebook') {
+    return `Has alcanzado el límite máximo de ${cupo.limite} notebooks simultáneas. Debes devolver una notebook para poder reservar otra.`;
   }
-  return limite;
+  return `Has alcanzado el límite máximo de ${cupo.limite} equipos de la categoría ${cupo.nombre} simultáneos. Debes devolver uno para poder reservar otro.`;
 }
 
-async function contarNotebooksActivas(idUsuario: string): Promise<number> {
-  const { data, error } = await supabase
-    .from('detalle_prestamos')
-    .select('id_detalle, prestamos!inner(id_usuario, estado), equipos!inner(categorias_equipo!inner(nombre))')
-    .eq('prestamos.id_usuario', idUsuario)
-    .in('prestamos.estado', ['Reservado', 'En Curso'])
-    .eq('equipos.categorias_equipo.nombre', 'Notebook');
-  if (error) throw new Error(error.message);
-  return data?.length ?? 0;
+export function cupoDeEquipo(cupos: CupoCategoria[], equipo: Equipo): CupoCategoria | undefined {
+  return cupos.find((c) => c.id_categoria === equipo.id_categoria);
 }
 
-export async function cargarCupoNotebooks(idUsuario: string): Promise<CupoNotebooks> {
-  const [limite, activas] = await Promise.all([
-    obtenerLimiteNotebooks(),
-    contarNotebooksActivas(idUsuario),
+export async function cargarCuposEstudiante(idUsuario: string): Promise<CupoCategoria[]> {
+  const [{ data: categorias, error: cErr }, { data: detalles, error: dErr }] = await Promise.all([
+    supabase
+      .from('categorias_equipo')
+      .select('id_categoria, nombre, limite_alumnos')
+      .not('limite_alumnos', 'is', null),
+    supabase
+      .from('detalle_prestamos')
+      .select('equipos!inner(id_categoria), prestamos!inner(id_usuario, estado)')
+      .eq('prestamos.id_usuario', idUsuario)
+      .in('prestamos.estado', ESTADOS_ACTIVOS),
   ]);
-  return { limite, activas };
+  if (cErr) throw new Error(cErr.message);
+  if (dErr) throw new Error(dErr.message);
+
+  const activasPorCategoria = new Map<string, number>();
+  for (const d of (detalles ?? []) as { equipos: { id_categoria: string } | null }[]) {
+    const id = d.equipos?.id_categoria;
+    if (!id) continue;
+    activasPorCategoria.set(id, (activasPorCategoria.get(id) ?? 0) + 1);
+  }
+
+  return (categorias ?? []).map((c: { id_categoria: string; nombre: string; limite_alumnos: number }) => ({
+    id_categoria: c.id_categoria,
+    nombre: c.nombre,
+    limite: c.limite_alumnos,
+    activas: activasPorCategoria.get(c.id_categoria) ?? 0,
+  }));
 }
 
-export async function actualizarLimiteNotebooks(
+export async function cargarCategorias(): Promise<Categoria[]> {
+  const { data, error } = await supabase
+    .from('categorias_equipo')
+    .select('*')
+    .order('nombre');
+  if (error) throw new Error(error.message);
+  return (data ?? []) as Categoria[];
+}
+
+export async function actualizarLimiteCategoria(
   idUsuario: string,
   password: string,
-  valor: number,
-): Promise<number> {
-  const { data, error } = await supabase.rpc('actualizar_limite_notebooks', {
+  idCategoria: string,
+  limite: number | null,
+): Promise<number | null> {
+  const { data, error } = await supabase.rpc('actualizar_limite_categoria', {
     p_id_usuario: idUsuario,
     p_password: password,
-    p_valor: valor,
+    p_id_categoria: idCategoria,
+    p_limite: limite,
   });
   if (error) throw new Error(error.message);
-  if (typeof data !== 'number') throw new Error('Respuesta inesperada al guardar el límite');
+  if (data !== null && typeof data !== 'number') throw new Error('Respuesta inesperada al guardar el límite');
   return data;
 }

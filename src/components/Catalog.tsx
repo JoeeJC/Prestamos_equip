@@ -3,11 +3,11 @@ import { Search, Package } from 'lucide-react';
 import { supabase, type Categoria, type Equipo } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth';
 import {
-  aplicaLimiteNotebooks,
-  cargarCupoNotebooks,
-  esNotebook,
-  mensajeLimiteNotebooks,
-  type CupoNotebooks,
+  aplicaLimitesReserva,
+  cargarCuposEstudiante,
+  cupoDeEquipo,
+  mensajeLimiteCategoria,
+  type CupoCategoria,
   verificarYCaducarReservasVencidas,
 } from '@/lib/prestamos';
 import Badge, { estadoEquipoVariant } from '@/components/Badge';
@@ -21,28 +21,28 @@ export default function Catalog({
 }) {
   const { session } = useAuth();
   const idUsuario = session?.usuario.id_usuario;
-  const limitado = !!session && aplicaLimiteNotebooks(session.roles);
+  const limitado = !!session && aplicaLimitesReserva(session.roles);
   const [equipos, setEquipos] = useState<Equipo[]>([]);
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState('');
   const [cat, setCat] = useState<string>('all');
   const [estado, setEstado] = useState<string>('all');
-  const [cupo, setCupo] = useState<CupoNotebooks | null>(null);
+  const [cupos, setCupos] = useState<CupoCategoria[]>([]);
 
   useEffect(() => {
     let active = true;
     (async () => {
       await verificarYCaducarReservasVencidas().catch(() => undefined);
-      const [{ data: e }, { data: c }, cupoActual] = await Promise.all([
+      const [{ data: e }, { data: c }, cuposActuales] = await Promise.all([
         supabase.from('equipos').select('*, categorias_equipo(*)').order('codigo_inventario'),
         supabase.from('categorias_equipo').select('*').order('nombre'),
-        limitado && idUsuario ? cargarCupoNotebooks(idUsuario).catch(() => null) : null,
+        limitado && idUsuario ? cargarCuposEstudiante(idUsuario).catch(() => null) : null,
       ]);
       if (!active) return;
       setEquipos((e ?? []) as Equipo[]);
       setCategorias((c ?? []) as Categoria[]);
-      setCupo(cupoActual);
+      setCupos(cuposActuales ?? []);
       setLoading(false);
     })();
     return () => {
@@ -64,8 +64,11 @@ export default function Catalog({
     });
   }, [equipos, q, cat, estado]);
 
-  const sinCupoNotebooks = (eq: Equipo) =>
-    limitado && esNotebook(eq) && cupo !== null && cupo.activas >= cupo.limite;
+  const cupoBloqueado = (eq: Equipo): CupoCategoria | undefined => {
+    if (!limitado) return undefined;
+    const cupo = cupoDeEquipo(cupos, eq);
+    return cupo && cupo.activas >= cupo.limite ? cupo : undefined;
+  };
 
   if (loading) {
     return (
@@ -121,7 +124,9 @@ export default function Catalog({
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {filtered.map((eq) => (
+          {filtered.map((eq) => {
+            const bloqueo = cupoBloqueado(eq);
+            return (
             <div key={eq.id_equipo} className="card flex flex-col p-4 transition hover:shadow-card">
               <div className="mb-3 flex items-start justify-between gap-2">
                 <div>
@@ -145,23 +150,24 @@ export default function Catalog({
               )}
               <div
                 className="mt-auto pt-4"
-                title={sinCupoNotebooks(eq) && cupo ? mensajeLimiteNotebooks(cupo.limite) : undefined}
+                title={bloqueo ? mensajeLimiteCategoria(bloqueo) : undefined}
               >
                 <button
                   type="button"
-                  disabled={eq.estado !== 'Disponible' || sinCupoNotebooks(eq)}
+                  disabled={eq.estado !== 'Disponible' || !!bloqueo}
                   onClick={() => onReserve(eq)}
                   className="btn-primary w-full"
                 >
                   {eq.estado !== 'Disponible'
                     ? 'No disponible'
-                    : sinCupoNotebooks(eq)
-                      ? `Cupo máximo alcanzado (${cupo?.activas}/${cupo?.limite})`
+                    : bloqueo
+                      ? `Cupo máximo alcanzado (${bloqueo.activas}/${bloqueo.limite})`
                       : 'Reservar'}
                 </button>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

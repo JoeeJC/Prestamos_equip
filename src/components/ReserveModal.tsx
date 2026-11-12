@@ -4,11 +4,11 @@ import { supabase, type Equipo, type Categoria } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth';
 import Badge, { estadoEquipoVariant } from '@/components/Badge';
 import {
-  aplicaLimiteNotebooks,
-  cargarCupoNotebooks,
-  esNotebook,
-  mensajeLimiteNotebooks,
-  type CupoNotebooks,
+  aplicaLimitesReserva,
+  cargarCuposEstudiante,
+  cupoDeEquipo,
+  mensajeLimiteCategoria,
+  type CupoCategoria,
 } from '@/lib/prestamos';
 
 const MAX_HOURS = 5;
@@ -37,17 +37,17 @@ export default function ReserveModal({
   const [hours, setHours] = useState(3);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [cupo, setCupo] = useState<CupoNotebooks | null>(null);
+  const [cupos, setCupos] = useState<CupoCategoria[]>([]);
 
   const idUsuario = session?.usuario.id_usuario;
-  const limitado = !!session && aplicaLimiteNotebooks(session.roles);
+  const limitado = !!session && aplicaLimitesReserva(session.roles);
 
   useEffect(() => {
     if (!idUsuario || !limitado) return;
     let active = true;
-    cargarCupoNotebooks(idUsuario)
+    cargarCuposEstudiante(idUsuario)
       .then((c) => {
-        if (active) setCupo(c);
+        if (active) setCupos(c);
       })
       .catch(() => {
         if (active) setError('No se pudo verificar tu cupo de notebooks. Intentá nuevamente.');
@@ -96,11 +96,17 @@ export default function ReserveModal({
     });
   }, [equipos, cart, q]);
 
-  const notebooksEnCarrito = cart.filter(esNotebook).length;
-  const cupoNotebooksLleno =
-    limitado && cupo !== null && cupo.activas + notebooksEnCarrito >= cupo.limite;
-  const excedeCupoNotebooks =
-    limitado && cupo !== null && cupo.activas + notebooksEnCarrito > cupo.limite;
+  const enCarrito = (categoriaId: string) => cart.filter((eq) => eq.id_categoria === categoriaId).length;
+  const cupoBloqueado = (eq: Equipo): CupoCategoria | undefined => {
+    const cupo = cupoDeEquipo(cupos, eq);
+    return limitado && cupo && cupo.activas + enCarrito(eq.id_categoria) >= cupo.limite ? cupo : undefined;
+  };
+  const categoriasLlenas = limitado
+    ? cupos.filter((c) => c.activas + enCarrito(c.id_categoria) >= c.limite)
+    : [];
+  const categoriaExcedida = limitado
+    ? cupos.find((c) => c.activas + enCarrito(c.id_categoria) > c.limite)
+    : undefined;
 
   const addToCart = (eq: Equipo) => setCart((c) => [...c, eq]);
   const removeFromCart = (id: string) => setCart((c) => c.filter((x) => x.id_equipo !== id));
@@ -127,10 +133,11 @@ export default function ReserveModal({
     setBusy(true);
     try {
       if (limitado) {
-        const actual = await cargarCupoNotebooks(session.usuario.id_usuario);
-        if (actual.activas + notebooksEnCarrito > actual.limite) {
-          setCupo(actual);
-          setError(mensajeLimiteNotebooks(actual.limite));
+        const actuales = await cargarCuposEstudiante(session.usuario.id_usuario);
+        setCupos(actuales);
+        const excedida = actuales.find((c) => c.activas + enCarrito(c.id_categoria) > c.limite);
+        if (excedida) {
+          setError(mensajeLimiteCategoria(excedida));
           return;
         }
       }
@@ -313,18 +320,22 @@ export default function ReserveModal({
           <div className="card p-4">
             <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-gray-800 dark:text-gray-100">
               <PlusCircle size={16} className="text-brand-600" /> Equipos disponibles
-              {limitado && (
-                <span className="ml-auto text-xs font-normal text-gray-500">
-                  Notebooks activas: {cupo?.activas ?? '…'}/{cupo?.limite ?? '…'}
+              {limitado && cupos.length > 0 && (
+                <span className="ml-auto flex gap-3 text-xs font-normal text-gray-500">
+                  {cupos.map((c) => (
+                    <span key={c.id_categoria}>
+                      {c.nombre}: {c.activas}/{c.limite}
+                    </span>
+                  ))}
                 </span>
               )}
             </div>
-            {cupoNotebooksLleno && cupo && (
-              <div className="mb-3 flex items-start gap-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-600 dark:bg-amber-950/30">
+            {categoriasLlenas.map((c) => (
+              <div key={c.id_categoria} className="mb-3 flex items-start gap-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-600 dark:bg-amber-950/30">
                 <AlertCircle size={16} className="mt-0.5 shrink-0" />
-                <span>{mensajeLimiteNotebooks(cupo.limite)}</span>
+                <span>{mensajeLimiteCategoria(c)}</span>
               </div>
-            )}
+            ))}
             <input
               className="input mb-3"
               placeholder="Buscar equipo para agregar…"
@@ -350,11 +361,11 @@ export default function ReserveModal({
                     </div>
                     <button
                       type="button"
-                      disabled={cupoNotebooksLleno && esNotebook(eq)}
+                      disabled={!!cupoBloqueado(eq)}
                       onClick={() => addToCart(eq)}
                       className="btn-secondary h-8 px-2 text-xs"
                     >
-                      {cupoNotebooksLleno && esNotebook(eq) ? (
+                      {cupoBloqueado(eq) ? (
                         'Cupo lleno'
                       ) : (
                         <>
@@ -379,7 +390,7 @@ export default function ReserveModal({
             </button>
             <button
               type="button"
-              disabled={busy || excedeCupoNotebooks}
+              disabled={busy || !!categoriaExcedida}
               onClick={submit}
               className="btn-primary"
             >

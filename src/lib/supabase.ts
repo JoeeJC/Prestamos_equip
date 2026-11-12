@@ -33,6 +33,7 @@ export type Categoria = {
   id_categoria: string;
   nombre: string;
   descripcion: string | null;
+  limite_alumnos: number | null;
 };
 
 export type Equipo = {
