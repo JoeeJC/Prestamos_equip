@@ -24,7 +24,6 @@ export type Usuario = {
   apellido: string;
   email: string;
   telefono: string | null;
-  password_hash: string;
   estado: 'Activo' | 'Sancionado' | 'Inactivo';
   roles?: Rol[];
 };

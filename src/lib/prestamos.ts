@@ -81,14 +81,12 @@ export async function cargarCategorias(): Promise<Categoria[]> {
 }
 
 export async function actualizarLimiteCategoria(
-  idUsuario: string,
-  password: string,
+  token: string,
   idCategoria: string,
   limite: number | null,
 ): Promise<number | null> {
   const { data, error } = await supabase.rpc('actualizar_limite_categoria', {
-    p_id_usuario: idUsuario,
-    p_password: password,
+    p_token: token,
     p_id_categoria: idCategoria,
     p_limite: limite,
   });

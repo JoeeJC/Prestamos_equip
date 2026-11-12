@@ -98,7 +98,7 @@ export default function AdminPanel() {
     }
     const { data: u } = await supabase
       .from('usuarios')
-      .select('*, usuario_roles(roles(*))')
+      .select('id_usuario, dni, nombre, apellido, email, estado, usuario_roles(roles(*))')
       .eq('dni', d)
       .maybeSingle();
     if (!u) {
@@ -275,7 +275,7 @@ export default function AdminPanel() {
     setQuickValidating(true);
     const { data, error } = await supabase
       .from('usuarios')
-      .select('*, usuario_roles(roles(*))')
+      .select('id_usuario, dni, nombre, apellido, email, estado, usuario_roles(roles(*))')
       .eq('dni', documento)
       .maybeSingle();
     setQuickValidating(false);

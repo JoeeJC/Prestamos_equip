@@ -18,10 +18,8 @@ function valorOriginal(c: Categoria) {
 
 export default function LimitesReservaPanel() {
   const { session } = useAuth();
-  const idUsuario = session?.usuario.id_usuario;
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [borradores, setBorradores] = useState<Record<string, string>>({});
-  const [password, setPassword] = useState('');
   const [cargando, setCargando] = useState(true);
   const [guardandoId, setGuardandoId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -48,19 +46,14 @@ export default function LimitesReservaPanel() {
   const valorActual = (c: Categoria) => borradores[c.id_categoria] ?? valorOriginal(c);
 
   const guardar = async (c: Categoria) => {
-    if (!idUsuario) return;
+    if (!session) return;
     setError(null);
     setExito(null);
-    if (!password) {
-      setError('Ingresá tu contraseña para confirmar el cambio.');
-      return;
-    }
     const valor = valorActual(c);
     setGuardandoId(c.id_categoria);
     try {
       const guardado = await actualizarLimiteCategoria(
-        idUsuario,
-        password,
+        session.token,
         c.id_categoria,
         valor === SIN_LIMITE ? null : Number(valor),
       );
@@ -106,20 +99,6 @@ export default function LimitesReservaPanel() {
           <span>{exito}</span>
         </div>
       )}
-
-      <div className="mb-5">
-        <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-          Tu contraseña para confirmar cambios
-        </label>
-        <input
-          type="password"
-          className="input"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder="••••••••"
-          autoComplete="current-password"
-        />
-      </div>
 
       {cargando ? (
         <p className="py-8 text-center text-sm text-gray-500">Cargando categorías…</p>
