@@ -1,0 +1,6 @@
+{
+  "name": "ITU Equipos - Sistema de Gestión",
+  "description": "Sistema integral de inventario, control, asignación y mantenimiento de equipos ITU.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

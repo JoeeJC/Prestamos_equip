@@ -1,0 +1,258 @@
+import { useEffect, useMemo, useState } from 'react';
+import { Search, Package, CalendarClock } from 'lucide-react';
+import { supabase } from '@/services/supabaseClient';
+import type { Categoria, Equipo } from '@/types/database';
+import { useAuth } from '@/context/AuthContext';
+import {
+  aplicaLimitesReserva,
+  cargarCuposEstudiante,
+  cupoDeEquipo,
+  mensajeLimiteCategoria,
+  type CupoCategoria,
+  verificarYCaducarReservasVencidas,
+} from '@/features/prestamos/services/prestamosService';
+import { fechaLocalISO } from '@/utils/fechas';
+import Badge, { estadoEquipoVariant } from '@/components/ui/Badge';
+
+type ReservaAgendaEquipo = {
+  id_equipo: string;
+  fecha_prestamo: string;
+  hora_inicio_prevista: string;
+  hora_fin_prevista: string;
+  estado: string;
+};
+
+export default function Catalog({
+  onReserve,
+  refreshKey,
+}: {
+  onReserve: (equipo: Equipo) => void;
+  refreshKey: number;
+}) {
+  const { session } = useAuth();
+  const idUsuario = session?.usuario.id_usuario;
+  const limitado = !!session && aplicaLimitesReserva(session.roles);
+  const [equipos, setEquipos] = useState<Equipo[]>([]);
+  const [categorias, setCategorias] = useState<Categoria[]>([]);
+  const [agenda, setAgenda] = useState<ReservaAgendaEquipo[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [q, setQ] = useState('');
+  const [cat, setCat] = useState<string>('all');
+  const [estado, setEstado] = useState<string>('all');
+  const [cupos, setCupos] = useState<CupoCategoria[]>([]);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      await verificarYCaducarReservasVencidas().catch(() => undefined);
+      const [{ data: e }, { data: c }, { data: dets }, cuposActuales] = await Promise.all([
+        supabase
+          .from('equipos')
+          .select('*, categorias_equipo(*)')
+          .neq('oculto_catalogo', true)
+          .order('codigo_inventario'),
+        supabase.from('categorias_equipo').select('*').order('nombre'),
+        supabase
+          .from('detalle_prestamos')
+          .select('id_equipo, prestamos!inner(fecha_prestamo, hora_inicio_prevista, hora_fin_prevista, estado)')
+          .in('prestamos.estado', ['Reservado', 'En Curso']),
+        limitado && idUsuario ? cargarCuposEstudiante(idUsuario).catch(() => null) : null,
+      ]);
+      if (!active) return;
+
+      const agendaMapeada: ReservaAgendaEquipo[] = ((dets ?? []) as any[])
+        .map((d) => {
+          const p = Array.isArray(d.prestamos) ? d.prestamos[0] : d.prestamos;
+          if (!p) return null;
+          return {
+            id_equipo: d.id_equipo,
+            fecha_prestamo: p.fecha_prestamo,
+            hora_inicio_prevista: p.hora_inicio_prevista,
+            hora_fin_prevista: p.hora_fin_prevista,
+            estado: p.estado,
+          };
+        })
+        .filter((x): x is ReservaAgendaEquipo => Boolean(x));
+
+      setEquipos((e ?? []) as Equipo[]);
+      setCategorias((c ?? []) as Categoria[]);
+      setAgenda(agendaMapeada);
+      setCupos(cuposActuales ?? []);
+      setLoading(false);
+    })();
+    return () => {
+      active = false;
+    };
+  }, [refreshKey, idUsuario, limitado]);
+
+  const agendaPorEquipo = useMemo(() => {
+    const map = new Map<string, ReservaAgendaEquipo[]>();
+    for (const item of agenda) {
+      const lista = map.get(item.id_equipo) ?? [];
+      lista.push(item);
+      map.set(item.id_equipo, lista);
+    }
+    return map;
+  }, [agenda]);
+
+  const filtered = useMemo(() => {
+    const query = q.trim().toLowerCase();
+    return equipos.filter((eq) => {
+      if (eq.oculto_catalogo) return false;
+      if (cat !== 'all' && eq.id_categoria !== cat) return false;
+      if (estado !== 'all' && eq.estado !== estado) return false;
+      if (!query) return true;
+      const hay = [eq.codigo_inventario, eq.numero_serie, eq.marca_modelo, eq.observaciones, eq.categorias_equipo?.nombre]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      return hay.includes(query);
+    });
+  }, [equipos, q, cat, estado]);
+
+  const cupoBloqueado = (eq: Equipo): CupoCategoria | undefined => {
+    if (!limitado) return undefined;
+    const cupo = cupoDeEquipo(cupos, eq);
+    return cupo && cupo.activas >= cupo.limite ? cupo : undefined;
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20 text-gray-500">
+        Cargando catálogo…
+      </div>
+    );
+  }
+
+  const hoy = fechaLocalISO();
+
+  return (
+    <div>
+      <div className="mb-6">
+        <h1 className="text-xl font-bold text-gray-900 dark:text-white">Catálogo de equipos</h1>
+        <p className="text-sm text-gray-500 dark:text-gray-400">
+          Buscá y reservá equipos según disponibilidad para la fecha y turno que necesites.
+        </p>
+      </div>
+
+      <div className="card mb-5 p-4">
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <div className="relative flex-1">
+            <Search size={16} className="pointer-events-none absolute left-3 top-2.5 text-gray-400" />
+            <input
+              className="input pl-9"
+              placeholder="Buscar por código, serie, marca…"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
+          </div>
+          <select className="input sm:w-48" value={cat} onChange={(e) => setCat(e.target.value)}>
+            <option value="all">Todas las categorías</option>
+            {categorias.map((c) => (
+              <option key={c.id_categoria} value={c.id_categoria}>
+                {c.nombre}
+              </option>
+            ))}
+          </select>
+          <select className="input sm:w-44" value={estado} onChange={(e) => setEstado(e.target.value)}>
+            <option value="all">Todos los estados</option>
+            <option value="Disponible">Disponible</option>
+            <option value="En préstamo">En préstamo</option>
+            <option value="En mantenimiento">En mantenimiento</option>
+            <option value="Baja">Baja</option>
+          </select>
+        </div>
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="card flex flex-col items-center justify-center px-6 py-16 text-center">
+          <Package size={36} className="mb-3 text-gray-300" />
+          <p className="text-sm text-gray-500">No se encontraron equipos con esos filtros.</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {filtered.map((eq) => {
+            const bloqueo = cupoBloqueado(eq);
+            const noOperativo = eq.estado === 'En mantenimiento' || eq.estado === 'Baja';
+            const reservasEq = agendaPorEquipo.get(eq.id_equipo) ?? [];
+            const reservasHoy = reservasEq
+              .filter((r) => r.fecha_prestamo === hoy && r.estado === 'Reservado')
+              .sort((a, b) => a.hora_inicio_prevista.localeCompare(b.hora_inicio_prevista));
+            const reservasFuturas = reservasEq.filter((r) => r.fecha_prestamo > hoy && r.estado === 'Reservado');
+
+            return (
+              <div key={eq.id_equipo} className="card flex flex-col p-4 transition hover:shadow-card">
+                <div className="mb-3 flex items-start justify-between gap-2">
+                  <div>
+                    <p className="text-xs font-medium uppercase tracking-wide text-brand-600 dark:text-brand-300">
+                      {eq.categorias_equipo?.nombre ?? '—'}
+                    </p>
+                    <p className="mt-0.5 font-semibold text-gray-900 dark:text-white">
+                      {eq.codigo_inventario}
+                    </p>
+                  </div>
+                  <Badge variant={estadoEquipoVariant(eq.estado)}>{eq.estado}</Badge>
+                </div>
+                <p className="text-sm text-gray-700 dark:text-gray-200">{eq.marca_modelo ?? '—'}</p>
+                <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                  Serie: {eq.numero_serie ?? '—'}
+                </p>
+                {eq.observaciones && (
+                  <p className="mt-2 line-clamp-2 text-xs text-gray-500 dark:text-gray-400">
+                    {eq.observaciones}
+                  </p>
+                )}
+
+                {!noOperativo && (reservasHoy.length > 0 || reservasFuturas.length > 0 || eq.estado === 'En préstamo') && (
+                  <div className="mt-2.5 space-y-1 rounded-lg bg-gray-50 px-2.5 py-2 text-[11px] text-gray-600 dark:bg-gray-900/60 dark:text-gray-300">
+                    {eq.estado === 'En préstamo' && (
+                      <p className="font-medium text-amber-700 dark:text-amber-300">
+                        En uso ahora · reservable para próximos días
+                      </p>
+                    )}
+                    {reservasHoy.length > 0 && (
+                      <p className="flex items-center gap-1">
+                        <CalendarClock size={12} className="shrink-0 text-brand-600" />
+                        <span>
+                          Hoy:{' '}
+                          {reservasHoy
+                            .map((r) => `${r.hora_inicio_prevista.slice(0, 5)}–${r.hora_fin_prevista.slice(0, 5)}`)
+                            .join(', ')}
+                        </span>
+                      </p>
+                    )}
+                    {reservasFuturas.length > 0 && (
+                      <p className="text-gray-500 dark:text-gray-400">
+                        +{reservasFuturas.length} reserva{reservasFuturas.length === 1 ? '' : 's'} en días próximos
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                <div
+                  className="mt-auto pt-4"
+                  title={bloqueo ? mensajeLimiteCategoria(bloqueo) : undefined}
+                >
+                  <button
+                    type="button"
+                    disabled={noOperativo || !!bloqueo}
+                    onClick={() => onReserve(eq)}
+                    className="btn-primary w-full"
+                  >
+                    {noOperativo
+                      ? 'No disponible'
+                      : bloqueo
+                        ? `Cupo máximo alcanzado (${bloqueo.activas}/${bloqueo.limite})`
+                        : eq.estado === 'En préstamo'
+                          ? 'Reservar otra fecha'
+                          : 'Reservar'}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
