@@ -5,8 +5,7 @@ import { useAuth } from '@/context/AuthContext';
 const DEMO = [
   { dni: '34000001', desc: 'Ana López · Estudiante', pass: 'demo1234' },
   { dni: '34000004', desc: 'Pablo Ríos · Estudiante + Profesor', pass: 'demo1234' },
-  { dni: '34000006', desc: 'Diego Fernández · Administrativo', pass: 'demo1234' },
-  { dni: '34000005', desc: 'Sofía Núñez · Administrativo', pass: 'panol1234' },
+  { dni: '34000007', desc: 'Gabi · Administrativo', pass: 'demo1234' },
 ];
 
 export default function Login() {
